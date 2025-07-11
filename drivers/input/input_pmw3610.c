@@ -13,7 +13,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/spi.h>
 #include <zephyr/input/input.h>
-#include <zephyr/input/input_pmw3610.h>
+#include "input_pmw3610.h"
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/pm/device.h>
@@ -115,7 +115,14 @@ struct pmw3610_data {
 	struct gpio_callback motion_cb;
 	bool smart_flag;
 };
+static inline int32_t sign_extend(uint32_t value, uint8_t index)
+{
+	__ASSERT_NO_MSG(index <= 31);
 
+	uint8_t shift = 31 - index;
+
+	return (int32_t)(value << shift) >> shift;
+}
 static int pmw3610_read(const struct device *dev,
 			uint8_t addr, uint8_t *value, uint8_t len)
 {
