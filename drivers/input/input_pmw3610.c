@@ -20,8 +20,10 @@
 #include <zephyr/pm/device_runtime.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/logging/log.h>
+LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
-LOG_MODULE_REGISTER(input_pmw3610, CONFIG_INPUT_LOG_LEVEL);
+// LOG_MODULE_REGISTER(input_pmw3610, CONFIG_INPUT_LOG_LEVEL);
 
 /* Page 0 */
 #define PMW3610_PROD_ID		0x00
@@ -227,6 +229,7 @@ static void pmw3610_motion_work_handler(struct k_work *work)
 
 	input_report_rel(data->dev, cfg->axis_x, x, false, K_FOREVER);
 	input_report_rel(data->dev, cfg->axis_y, y, true, K_FOREVER);
+	LOG_DBG("has motion report");
 
 	if (cfg->smart_mode) {
 		uint16_t shutter_val = sys_get_be16(&burst_data[BURST_SHUTTER_HI]);
@@ -261,6 +264,7 @@ static void pmw3610_motion_handler(const struct device *gpio_dev,
 				   struct gpio_callback *cb,
 				   uint32_t pins)
 {
+	LOG_DBG("has motion");
 	struct pmw3610_data *data = CONTAINER_OF(
 			cb, struct pmw3610_data, motion_cb);
 
@@ -273,7 +277,7 @@ int pmw3610_set_resolution(const struct device *dev, uint16_t res_cpi)
 	int ret;
 
 	if (!IN_RANGE(res_cpi, RES_MIN, RES_MAX)) {
-		LOG_ERR("res_cpi out of range: %d", res_cpi);
+		LOG_DBG("res_cpi out of range: %d", res_cpi);
 		return -EINVAL;
 	}
 
@@ -356,15 +360,17 @@ static int pmw3610_configure(const struct device *dev)
 
 	if (cfg->reset_gpio.port != NULL) {
 		if (!gpio_is_ready_dt(&cfg->reset_gpio)) {
-			LOG_ERR("%s is not ready", cfg->reset_gpio.port->name);
+			LOG_DBG("%s is not ready", cfg->reset_gpio.port->name);
 			return -ENODEV;
 		}
+		LOG_DBG("reset gpio: %s is ready", cfg->reset_gpio.port->name);
 
 		ret = gpio_pin_configure_dt(&cfg->reset_gpio, GPIO_OUTPUT_ACTIVE);
 		if (ret != 0) {
-			LOG_ERR("Reset pin configuration failed: %d", ret);
+			LOG_DBG("Reset pin configuration failed: %d", ret);
 			return ret;
 		}
+		LOG_DBG("Reset pin configuration success: %d", ret);
 
 		k_sleep(K_MSEC(RESET_DELAY_MS));
 
@@ -382,22 +388,25 @@ static int pmw3610_configure(const struct device *dev)
 
 	ret = pmw3610_read_reg(dev, PMW3610_PROD_ID, &val);
 	if (ret < 0) {
+		LOG_DBG("pmw step -1 failed: %d", ret);
 		return ret;
 	}
 
-	if (val != PRODUCT_ID_PMW3610) {
-		LOG_ERR("Invalid product id: %02x", val);
-		return -ENOTSUP;
-	}
+	// if (val != PRODUCT_ID_PMW3610) {
+	// 	LOG_DBG("Invalid product id: %02x", val);
+	// 	return -ENOTSUP;
+	// }
 
 	/* Power-up init sequence */
 	ret = pmw3610_spi_clk_on(dev);
 	if (ret < 0) {
+		LOG_DBG("pmw step 0 failed: %d", ret);
 		return ret;
 	}
 
 	ret = pmw3610_write_reg(dev, PMW3610_OBSERVATION1, 0);
 	if (ret < 0) {
+		LOG_DBG("pmw step 1 failed: %d", ret);
 		return ret;
 	}
 
@@ -405,28 +414,32 @@ static int pmw3610_configure(const struct device *dev)
 
 	ret = pmw3610_read_reg(dev, PMW3610_OBSERVATION1, &val);
 	if (ret < 0) {
+		LOG_DBG("pmw step 2 failed: %d", ret);
 		return ret;
 	}
 
 	if ((val & OBSERVATION1_INIT_MASK) != OBSERVATION1_INIT_MASK) {
-		LOG_ERR("Unexpected OBSERVATION1 value: %02x", val);
+		LOG_DBG("Unexpected OBSERVATION1 value: %02x", val);
 		return -EINVAL;
 	}
 
 	for (uint8_t reg = PMW3610_MOTION; reg <= PMW3610_DELTA_XY_H; reg++) {
 		ret = pmw3610_read_reg(dev, reg, &val);
 		if (ret < 0) {
+			LOG_DBG("pmw step 3 failed: %d", ret);
 			return ret;
 		}
 	}
 
 	ret = pmw3610_write_reg(dev, PMW3610_PERFORMANCE, PERFORMANCE_INIT);
 	if (ret < 0) {
+		LOG_DBG("pmw step 4 failed: %d", ret);
 		return ret;
 	}
 
 	ret = pmw3610_write_reg(dev, PMW3610_RUN_DOWNSHIFT, RUN_DOWNSHIFT_INIT);
 	if (ret < 0) {
+		LOG_DBG("pmw step 4 failed: %d", ret);
 		return ret;
 	}
 
@@ -471,6 +484,7 @@ static int pmw3610_configure(const struct device *dev)
 	ret = pmw3610_spi_clk_off(dev);
 	if (ret < 0) {
 		return ret;
+		LOG_DBG("pmw step clk off failed: %d", ret);
 	}
 
 	/* The remaining functions call spi_clk_on/off independently. */
@@ -481,6 +495,7 @@ static int pmw3610_configure(const struct device *dev)
 
 	pmw3610_force_awake(dev, cfg->force_awake);
 
+	LOG_DBG("pmw config success: %d", ret);
 	return 0;
 }
 
@@ -491,52 +506,59 @@ static int pmw3610_init(const struct device *dev)
 	int ret;
 
 	if (!spi_is_ready_dt(&cfg->spi)) {
-		LOG_ERR("%s is not ready", cfg->spi.bus->name);
+		LOG_DBG("%s is not ready", cfg->spi.bus->name);
 		return -ENODEV;
 	}
+	LOG_DBG("pmw spi ready");
 
 	data->dev = dev;
 
 	k_work_init(&data->motion_work, pmw3610_motion_work_handler);
 
 	if (!gpio_is_ready_dt(&cfg->motion_gpio)) {
-		LOG_ERR("%s is not ready", cfg->motion_gpio.port->name);
+		LOG_DBG("%s is not ready", cfg->motion_gpio.port->name);
 		return -ENODEV;
 	}
+	LOG_DBG("pmw motion ready");
 
 	ret = gpio_pin_configure_dt(&cfg->motion_gpio, GPIO_INPUT);
 	if (ret != 0) {
-		LOG_ERR("Motion pin configuration failed: %d", ret);
+		LOG_DBG("Motion pin configuration failed: %d", ret);
 		return ret;
 	}
+	LOG_DBG("pmw motion config success");
 
 	gpio_init_callback(&data->motion_cb, pmw3610_motion_handler,
 			   BIT(cfg->motion_gpio.pin));
 
-	ret = gpio_add_callback_dt(&cfg->motion_gpio, &data->motion_cb);
+	ret = gpio_add_callback(cfg->motion_gpio.port, &data->motion_cb);
 	if (ret < 0) {
-		LOG_ERR("Could not set motion callback: %d", ret);
+		LOG_DBG("Could not set motion callback: %d", ret);
 		return ret;
 	}
+	LOG_DBG("pmw motion callback config success");
 
 	ret = pmw3610_configure(dev);
 	if (ret != 0) {
-		LOG_ERR("Device configuration failed: %d", ret);
+		LOG_DBG("Device configuration failed: %d", ret);
 		return ret;
 	}
+	LOG_DBG("pmw device config success");
 
 	ret = gpio_pin_interrupt_configure_dt(&cfg->motion_gpio,
 					      GPIO_INT_EDGE_TO_ACTIVE);
 	if (ret != 0) {
-		LOG_ERR("Motion interrupt configuration failed: %d", ret);
+		LOG_DBG("Motion interrupt configuration failed: %d", ret);
 		return ret;
 	}
+	LOG_DBG("pmw Motion interrupt configuration success");
 
 	ret = pm_device_runtime_enable(dev);
 	if (ret < 0) {
-		LOG_ERR("Failed to enable runtime power management: %d", ret);
+		LOG_DBG("Failed to enable runtime power management: %d", ret);
 		return ret;
 	}
+	LOG_DBG("pmw success to enable runtime power management");
 
 	return 0;
 }
