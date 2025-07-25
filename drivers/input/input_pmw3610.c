@@ -214,10 +214,12 @@ static void pmw3610_motion_work_handler(struct k_work *work)
 
 	ret = pmw3610_read(dev, PMW3610_BURST_READ, burst_data, burst_data_len);
 	if (ret < 0) {
+		LOG_DBG("no burst read data");
 		return;
 	}
 
 	if ((burst_data[BURST_MOTION] & MOTION_STATUS_MOTION) == 0x00) {
+		LOG_DBG("no motion");
 		return;
 	}
 
@@ -258,6 +260,7 @@ static void pmw3610_motion_work_handler(struct k_work *work)
 			data->smart_flag = true;
 		}
 	}
+	pmw3610_write_reg(dev, PMW3610_MOTION, 0);
 }
 
 static void pmw3610_motion_handler(const struct device *gpio_dev,
@@ -391,6 +394,7 @@ static int pmw3610_configure(const struct device *dev)
 		LOG_DBG("pmw step -1 failed: %d", ret);
 		return ret;
 	}
+	LOG_DBG("product id: %02x", val);
 
 	// if (val != PRODUCT_ID_PMW3610) {
 	// 	LOG_DBG("Invalid product id: %02x", val);
